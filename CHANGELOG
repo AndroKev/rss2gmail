@@ -1,3 +1,11 @@
+v0.5(2015-08)
+    * Deleted.: unneeded smtp-code+smtp-config
+    * Changed.: Var imap to var gmail 
+    * Deleted.: 
+    * Added...: Error Msg, if config file didn't exists
+    * Fixed...:
+    * Improved:
+
 v2.72-rcarmo (2015-03)
     * Flush read messages after one day instead of on every run
 
