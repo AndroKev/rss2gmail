@@ -15,19 +15,20 @@ Usage:
   opmlexport
   opmlimport filename
 """
-__version__ = "2.71-rcarmo"
+__version__ = "2.72-rcarmo"
 __author__ = "Lindsey Smith (lindsey@allthingsrss.com)"
 __copyright__ = "(C) 2004 Aaron Swartz. GNU GPL 2 or 3."
 ___contributors__ = ["Dean Jackson", "Brian Lalor", "Joey Hess", 
                      "Matej Cepl", "Martin 'Joey' Schulze", 
                      "Marcel Ackermann (http://www.DreamFlasher.de)", 
-                     "Rui Carmo (http://the.taoofmac.com)",
+                     "Rui Carmo (http://taoofmac.com)",
                      "Lindsey Smith (maintainer)", "Erik Hetzner",
                      "Aaron Swartz (original author)" ]
 
 ### Import Modules ###
 
 import os, sys, re, time
+from datetime import datetime, timedelta
 import socket, urllib2, urlparse, imaplib, smtplib
 urllib2.install_opener(urllib2.build_opener())
 import string, csv, StringIO
@@ -42,7 +43,7 @@ from email.Header import Header
 from email.Utils import parseaddr, formataddr
              
 import feedparser
-feedparser.USER_AGENT = "rss2email/"+__version__+ " +https://github.com/rcarmo/rss2email"
+feedparser.USER_AGENT = "rss2email/"+__version__+ " +https://github.com/rcarmo/rss2imap"
 
 import html2text as h2t
 from summarize import summarize
@@ -62,7 +63,7 @@ h2t.BODY_WIDTH = BODY_WIDTH
 html2text = h2t.html2text
 
 
-def send(sender, recipient, subject, body, contenttype, datetime, extraheaders=None, mailserver=None, folder=None):
+def send(sender, recipient, subject, body, contenttype, when, extraheaders=None, mailserver=None, folder=None):
     """Send an email.
     
     All arguments should be Unicode strings (plain ASCII works as well).
@@ -155,7 +156,7 @@ def send(sender, recipient, subject, body, contenttype, datetime, extraheaders=N
             print >>warn, ("%s does not exist, creating" % folder)
             mailserver.create(folder)
             mailserver.subscribe(folder)
-        mailserver.append(folder,'',imaplib.Time2Internaldate(datetime), msg_as_string)
+        mailserver.append(folder,'',imaplib.Time2Internaldate(when), msg_as_string)
         return mailserver
 
     elif SMTP_SEND:
@@ -651,12 +652,12 @@ def run(num=None):
 
                     title = title.replace("\n", " ").strip()
                     
-                    datetime = time.gmtime()
+                    when = time.gmtime()
 
                     if DATE_HEADER:
                         for datetype in DATE_HEADER_ORDER:
                             kind = datetype+"_parsed"
-                            if kind in entry and entry[kind]: datetime = entry[kind]
+                            if kind in entry and entry[kind]: when = entry[kind]
                         
                     link = entry.get('link', "")
                     
@@ -666,7 +667,7 @@ def run(num=None):
                     fromhdr = formataddr((name, from_addr,))
                     tohdr = (f.to or default_to)
                     subjecthdr = title
-                    datehdr = time.strftime("%a, %d %b %Y %H:%M:%S -0000", datetime)
+                    datehdr = time.strftime("%a, %d %b %Y %H:%M:%S -0000", when)
                     useragenthdr = "rss2email"
                     
                     # Add post tags, if available
@@ -779,7 +780,7 @@ def run(num=None):
                                     if ('rel' in extralink) and extralink['rel'] == u'via':
                                         content += '<a href="'+extralink['href']+'">Via: '+extralink['title']+'</a>\n'
 
-                    mailserver = send(fromhdr, tohdr, subjecthdr, content, contenttype, datetime, extraheaders, mailserver, f.folder)
+                    mailserver = send(fromhdr, tohdr, subjecthdr, content, contenttype, when, extraheaders, mailserver, f.folder)
             
                     f.seen[frameid] = id
                     
@@ -823,7 +824,8 @@ def run(num=None):
                     if folder == IMAP_MOVE_READ_TO or '\Noselect' in row[0]:
                         continue
                     mailserver.select(folder)
-                    res, data = mailserver.search(None, '(SEEN UNFLAGGED)')
+                    yesterday = (datetime.now() - timedelta(days=1)).strftime("%d-%b-%Y")
+                    res, data = mailserver.search(None, '(SEEN BEFORE %s UNFLAGGED)' % yesterday)
                     if res == 'OK':
                         items = data[0].split()
                         for i in items:
@@ -948,7 +950,7 @@ if __name__ == '__main__':
         
         if action == "run": 
             if args and args[0] == "--no-send":
-                def send(sender, recipient, subject, body, contenttype, datetime, extraheaders=None, mailserver=None, folder=None):
+                def send(sender, recipient, subject, body, contenttype, when, extraheaders=None, mailserver=None, folder=None):
                     if VERBOSE: print 'Not sending:', unu(subject)
 
             if args and args[-1].isdigit(): run(int(args[-1]))
