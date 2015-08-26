@@ -28,6 +28,7 @@ ___contributors__ = ["Dean Jackson", "Brian Lalor", "Joey Hess",
 ### Import Modules ###
 
 import os, sys, re, time
+import argparse
 from datetime import datetime, timedelta
 import socket, urllib2, urlparse, imaplib
 urllib2.install_opener(urllib2.build_opener())
@@ -36,19 +37,19 @@ import hashlib, base64
 import traceback, types
 from types import *
 import threading, subprocess
-import cPickle as pickle
 
 from email.MIMEText import MIMEText
 from email.Header import Header
 from email.Utils import parseaddr, formataddr
              
 import feedparser
-feedparser.USER_AGENT = "rss2gmail/"+__version__+ " +https://github.com/AndroKev/rss2gmail"
-
 import html2text as h2t
 
+feedparser.USER_AGENT = "rss2gmail/"+__version__+ " +https://github.com/AndroKev/rss2gmail"
+VALID_CHAR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.-_/"
 DEFAULT_IMAP_FOLDER = "INBOX"
 warn = sys.stderr
+
 # Read options from config file if present.
 sys.path.insert(0,".")
 try:
@@ -63,6 +64,14 @@ h2t.LINKS_EACH_PARAGRAPH = LINKS_EACH_PARAGRAPH
 h2t.BODY_WIDTH = BODY_WIDTH
 html2text = h2t.html2text
 
+def clean_foldername(foldername):
+    _str=""
+    for c in foldername:
+        if c.isalnum():
+            _str+=c
+        else:
+            _str+="_"
+    return _str
 
 def send(sender, recipient, subject, body, contenttype, when, extraheaders=None, mailserver=None, folder=None):
     """Send an email.
@@ -107,10 +116,7 @@ def send(sender, recipient, subject, body, contenttype, when, extraheaders=None,
     
     # Create the message ('plain' stands for Content-Type: text/plain)
     msg = MIMEText(body.encode(body_charset), contenttype, body_charset)
-    if IMAP_OVERRIDE_TO:
-        msg['To'] = IMAP_OVERRIDE_TO
-    else:
-        msg['To'] = formataddr((recipient_name, recipient_addr))
+    msg['To'] = formataddr((recipient_name, recipient_addr))
     msg['Subject'] = Header(unicode(subject), header_charset)
     for hdr in extraheaders.keys():
         try:
@@ -119,10 +125,7 @@ def send(sender, recipient, subject, body, contenttype, when, extraheaders=None,
             msg[hdr] = Header(extraheaders[hdr])
         
     fromhdr = formataddr((sender_name, sender_addr))
-    if IMAP_MUNGE_FROM:
-        msg['From'] = extraheaders['X-MUNGED-FROM']
-    else:
-        msg['From'] = fromhdr
+    msg['From'] = fromhdr
 
     msg_as_string = msg.as_string()
 
@@ -152,9 +155,6 @@ def send(sender, recipient, subject, body, contenttype, when, extraheaders=None,
     return mailserver
 
 warn = sys.stderr
-    
-if QP_REQUIRED:
-    print >>warn, "QP_REQUIRED has been deprecated in rss2email."
 
 
 unix = 0
@@ -320,40 +320,64 @@ def validateEmail(email, planb):
     return email
     
 def getEmail(r, entry):
-    """Get the best email_address. If the best guess isn't well-formed (something@somthing.com), use DEFAULT_FROM instead"""
+    """Get the best email_address. If the best guess isn't well-formed (something@somthing.com), use DEFAULT_EMAIL_FROM instead"""
     
     feed = r.feed
         
-    if FORCE_FROM: return DEFAULT_FROM
+    if FORCE_FROM: return DEFAULT_EMAIL_FROM
     
     if hasattr(r, "url") and r.url in OVERRIDE_EMAIL.keys():
-        return validateEmail(OVERRIDE_EMAIL[r.url], DEFAULT_FROM)
+        return validateEmail(OVERRIDE_EMAIL[r.url], DEFAULT_EMAIL_FROM)
     
     if 'email' in entry.get('author_detail', []):
-        return validateEmail(entry.author_detail.email, DEFAULT_FROM)
+        return validateEmail(entry.author_detail.email, DEFAULT_EMAIL_FROM)
     
     if 'email' in feed.get('author_detail', []):
-        return validateEmail(feed.author_detail.email, DEFAULT_FROM)
+        return validateEmail(feed.author_detail.email, DEFAULT_EMAIL_FROM)
         
     if USE_PUBLISHER_EMAIL:
         if 'email' in feed.get('publisher_detail', []):
-            return validateEmail(feed.publisher_detail.email, DEFAULT_FROM)
+            return validateEmail(feed.publisher_detail.email, DEFAULT_EMAIL_FROM)
         
         if feed.get("errorreportsto", ''):
-            return validateEmail(feed.errorreportsto, DEFAULT_FROM)
+            return validateEmail(feed.errorreportsto, DEFAULT_EMAIL_FROM)
             
     if hasattr(r, "url") and r.url in DEFAULT_EMAIL.keys():
         return DEFAULT_EMAIL[r.url]
-    return DEFAULT_FROM
+    return DEFAULT_EMAIL_FROM
 
 ### Simple Database of Feeds ###
 
 class Feed:
-    def __init__(self, url, to, folder=None):
-        self.url, self.etag, self.modified, self.seen = url, None, None, {}
-        self.active = True
-        self.to = to
-        self.folder = folder
+    def __init__(self, url, labels=None):
+            self.url = url
+            self.labels = labels
+            self.feed = feedparser.parse(self.url)
+            self.labels.append(self.feed['feed']['title'].strip())
+
+    def get_labels(self):
+        return self.labels
+
+    def get_entries(self):
+        entries=[]
+        for entry in self.feed["entries"]:
+            entries.append(entry)
+        return entries
+
+    def get_entries_ids(self):
+        ids=[]
+        for _id in self.get_entries():
+            ids.append(_id.get('id', ''))
+        return ids
+        # label = feed_getTitle(data).strip()
+    # if label == "" and url.startswith('http'):
+        # label = url[4:]
+    # return "".join( c for c in label if c in VALID_LABEL_CHAR)
+            
+            # self.url, self.etag, self.modified, self.seen = url, None, None, {}
+            # self.active = True
+            # self.to = to
+            # self.folder = folder
 
 def load(lock=1):
     if not os.path.exists(feedfile):
@@ -407,23 +431,44 @@ def parse(url, etag, modified):
         
 ### Program Functions ###
 
-def add(*args):
-    if len(args) == 2 and contains(args[1], '@') and not contains(args[1], '://'):
-        urls, to = [args[0]], args[1]
-        folder = None
-    elif len(args) >= 2:
-        urls, to, folder = [args[0]], None, ' '.join(args[1:])
-    else:
-        urls, to, folder = args, None, None
-    
-    feeds, feedfileObject = load()
-    if (feeds and not isstr(feeds[0]) and to is None) or (not len(feeds) and to is None):
-        print "No email address has been defined. Please run 'r2e email emailaddress' or"
-        print "'r2e add url emailaddress'."
-        sys.exit(1)
-    for url in urls: feeds.append(Feed(url, to, folder))
-    unlock(feeds, feedfileObject)
+def add(add_list):
+    url = add_list[0]
+    for feed in _list(True):
+        if url in feed:
+            print "This feed already exists!"
+            return
 
+
+    feed_options = [url]
+    d = Feed(url, add_list[1:])
+    _file = open(FEEDFILE_PATH, 'a')
+    feed_options.append(d.get_labels())
+    feed_options.append(FULLFEED)
+    v = "%s\n" %(feed_options)
+    _file.write(v.strip())
+    _file.close()
+    
+    if ADD_ARCHIVE_NEW_FEED:
+        t = "".join(x for x in url if x.isalnum())
+        path = os.path.join(ARCHIVE_PATH, t)
+        archive = open(path, 'a')
+        for i in d.get_entries():
+            # print(i.get('id', ''))
+            # exit()
+            archive.write("%s\n" % i.get('id', '').strip())
+        archive.close()
+
+def _list(array=False):
+    feeds = []
+    # print("Nr.)  url  labels  fullfeed")
+    # print("="*100)
+    for index, line in enumerate(open(FEEDFILE_PATH, 'r').readlines(), 1):
+        if line.strip() != "":
+            if array:
+                feeds.append(line.strip())
+            else:
+                print "%s.) %s" %(str(index), line.strip())
+    return feeds
 
 ### HTML Parser for grabbing links and images ###
 
@@ -770,21 +815,6 @@ def run(num=None):
             except:
                 mailserver.logout()
 
-def list():
-    feeds, feedfileObject = load(lock=0)
-    default_to = ""
-    default_folder = DEFAULT_IMAP_FOLDER
-    
-    if feeds and isstr(feeds[0]):
-        default_to = feeds[0]; ifeeds = feeds[1:]; i=1
-        print "default email:", default_to
-    else: ifeeds = feeds; i = 0
-    for f in ifeeds:
-        active = ('[ ]', '[*]')[f.active]
-        print `i`+':',active, f.url, '(to: '+(f.to or (default_to+' (default)'))+', ' + 'folder: '+(f.folder or (default_folder+' (default))'))
-        if not (f.to or default_to):
-            print "   W: Please define a default address with 'r2e email emailaddress'"
-        i+= 1
 
 def opmlexport():
     import xml.sax.saxutils
@@ -872,67 +902,105 @@ def email(addr):
     unlock(feeds, feedfileObject)
 
 if __name__ == '__main__':
-    args = sys.argv
-    try:
-        if len(args) < 3: raise InputError, "insufficient args"
-        feedfile, action, args = args[1], args[2], args[3:]
+
+    parser = argparse.ArgumentParser()
+    #parser.add_argument("-c", "--configdir", help="Run with <dir> as config directory", metavar="<dir>")
+    # parser.add_argument("-v", "--verbose", action="store_true")
+    #parser.add_argument("--no-send", help="Only load the feed, without sending them", action="store_true")
+    parser.add_argument("--add", help="Add a Feedurl to the FEEDFILE_PATH", metavar="feedurl (LABELS)", nargs="+")
+    parser.add_argument("-l", "--list", action="store_true")
+    # parser.add_argument("-d", "--delete", help="Delete an Feedurl", metavar="<nr>", type=int)
+    # parser.add_argument("--reset", help="Reset an Feed-Archive-File", metavar="<nr>", type=int)
+    # parser.add_argument("--enable", help="Enable a Feed", metavar="<nr>", type=int)
+    # parser.add_argument("--disable", help="Disable a Feed", metavar="<nr>", type=int)
+    args = parser.parse_args()
+
+    if not os.path.exists(FEEDFILE_PATH):
+        open(FEEDFILE_PATH,"w").close()
+    elif not os.path.exists(ARCHIVE_PATH):
+        os.makedirs(ARCHIVE_PATH)
+
+    if GMAIL_PASS == "" or GMAIL_USER == "":
+        print """It seams that you run the tool the first time.
+Please edit the config file to your need and start the tool again!"""
+    else:
+        if args.list:
+            _list()
+        # elif args.delete:
+            # delete(args.delete)
+        # elif args.enable:
+            # toggleactive(args.enable, True)
+        # elif args.disable:
+            # toggleactive(args.disable, False)
+        # elif args.reset:
+            # reset(args.reset)
+        elif args.add:
+            add(args.add)
+        # else:
+            # run(args.verbose)
+
+    
+    # args = sys.argv
+    # try:
+        # if len(args) < 3: raise InputError, "insufficient args"
+        # feedfile, action, args = args[1], args[2], args[3:]
         
-        if action == "run": 
-            if args and args[0] == "--no-send":
-                def send(sender, recipient, subject, body, contenttype, when, extraheaders=None, mailserver=None, folder=None):
-                    if VERBOSE: print 'Not sending:', unu(subject)
+        # if action == "run": 
+            # if args and args[0] == "--no-send":
+                # def send(sender, recipient, subject, body, contenttype, when, extraheaders=None, mailserver=None, folder=None):
+                    # if VERBOSE: print 'Not sending:', unu(subject)
 
-            if args and args[-1].isdigit(): run(int(args[-1]))
-            else: run()
+            # if args and args[-1].isdigit(): run(int(args[-1]))
+            # else: run()
 
-        elif action == "email":
-            if not args:
-                raise InputError, "Action '%s' requires an argument" % action
-            else:
-                email(args[0])
+        # elif action == "email":
+            # if not args:
+                # raise InputError, "Action '%s' requires an argument" % action
+            # else:
+                # email(args[0])
 
-        elif action == "add": add(*args)
+        # elif action == "add": add(*args)
 
-        elif action == "new": 
-            if len(args) == 1: d = [args[0]]
-            else: d = []
-            pickle.dump(d, open(feedfile, 'w'))
+        # elif action == "new": 
+            # if len(args) == 1: d = [args[0]]
+            # else: d = []
+            # pickle.dump(d, open(feedfile, 'w'))
 
-        elif action == "list": list()
+        # elif action == "list": list()
 
-        elif action in ("help", "--help", "-h"): print __doc__
+        # elif action in ("help", "--help", "-h"): print __doc__
 
-        elif action == "delete":
-            if not args:
-                raise InputError, "Action '%s' requires an argument" % action
-            elif args[0].isdigit():
-                delete(int(args[0]))
-            else:
-                raise InputError, "Action '%s' requires a number as its argument" % action
+        # elif action == "delete":
+            # if not args:
+                # raise InputError, "Action '%s' requires an argument" % action
+            # elif args[0].isdigit():
+                # delete(int(args[0]))
+            # else:
+                # raise InputError, "Action '%s' requires a number as its argument" % action
 
-        elif action in ("pause", "unpause"):
-            if not args:
-                raise InputError, "Action '%s' requires an argument" % action
-            elif args[0].isdigit():
-                active = (action == "unpause")
-                toggleactive(int(args[0]), active)
-            else:
-                raise InputError, "Action '%s' requires a number as its argument" % action
+        # elif action in ("pause", "unpause"):
+            # if not args:
+                # raise InputError, "Action '%s' requires an argument" % action
+            # elif args[0].isdigit():
+                # active = (action == "unpause")
+                # toggleactive(int(args[0]), active)
+            # else:
+                # raise InputError, "Action '%s' requires a number as its argument" % action
 
-        elif action == "reset": reset()
+        # elif action == "reset": reset()
 
-        elif action == "opmlexport": opmlexport()
+        # elif action == "opmlexport": opmlexport()
 
-        elif action == "opmlimport": 
-            if not args:
-                raise InputError, "OPML import '%s' requires a filename argument" % action
-            opmlimport(args[0])
+        # elif action == "opmlimport": 
+            # if not args:
+                # raise InputError, "OPML import '%s' requires a filename argument" % action
+            # opmlimport(args[0])
 
-        else:
-            raise InputError, "Invalid action"
+        # else:
+            # raise InputError, "Invalid action"
         
-    except InputError, e:
-        print "E:", e
-        print
-        print __doc__
+    # except InputError, e:
+        # print "E:", e
+        # print
+        # print __doc__
 
