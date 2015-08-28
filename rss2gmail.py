@@ -1,29 +1,19 @@
 #!/usr/bin/python
 """rss2gmail: get RSS feeds emailed to you
-http://rss2email.infogami.com
+https://github.com/AndroKev/rss2gmail
 
-Usage:
-  new [emailaddress] (create new feedfile)
-  email newemailaddress (update default email)
-  run [--no-send] [num],
-  add feedurl [emailaddress] [folder]
-  list
-  reset
-  delete n
-  pause n
-  unpause n
-  opmlexport
-  opmlimport filename
+Original Idee: http://rss2email.infogami.com
+Forked from: https://github.com/rcarmo/rss2imap
 """
 __version__ = "0.9"
-__author__ = "Lindsey Smith (lindsey@allthingsrss.com)"
+__author__ = "AndroKev"
 __copyright__ = "(C) 2004 Aaron Swartz. GNU GPL 2 or 3."
-___contributors__ = ["Dean Jackson", "Brian Lalor", "Joey Hess", 
-                     "Matej Cepl", "Martin 'Joey' Schulze", 
-                     "Marcel Ackermann (http://www.DreamFlasher.de)", 
+___contributors__ = ["Dean Jackson", "Brian Lalor", "Joey Hess",
+                     "Matej Cepl", "Martin 'Joey' Schulze",
+                     "Marcel Ackermann (http://www.DreamFlasher.de)",
                      "Rui Carmo (http://taoofmac.com)",
                      "Lindsey Smith (maintainer)", "Erik Hetzner",
-                     "Aaron Swartz (original author)" ]
+                     "Aaron Swartz (original author)", "rcarmo"]
 
 ### Import Modules ###
 
@@ -32,21 +22,19 @@ import argparse
 from datetime import datetime, timedelta
 import socket, urllib2, urlparse, imaplib
 urllib2.install_opener(urllib2.build_opener())
-import string, csv, StringIO
-import hashlib, base64
 import traceback, types
 from types import *
-import threading, subprocess
+import csv
 
 from email.MIMEText import MIMEText
 from email.Header import Header
 from email.Utils import parseaddr, formataddr
-             
+
 import feedparser
 import html2text as h2t
 
 feedparser.USER_AGENT = "rss2gmail/"+__version__+ " +https://github.com/AndroKev/rss2gmail"
-VALID_CHAR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890.-_/"
+VALID_CHAR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
 DEFAULT_IMAP_FOLDER = "INBOX"
 warn = sys.stderr
 
@@ -64,26 +52,19 @@ h2t.LINKS_EACH_PARAGRAPH = LINKS_EACH_PARAGRAPH
 h2t.BODY_WIDTH = BODY_WIDTH
 html2text = h2t.html2text
 
-def clean_foldername(foldername):
-    _str=""
-    for c in foldername:
-        if c.isalnum():
-            _str+=c
-        else:
-            _str+="_"
-    return _str
+### Mail Functions ###
 
 def send(sender, recipient, subject, body, contenttype, when, extraheaders=None, mailserver=None, folder=None):
     """Send an email.
-    
+
     All arguments should be Unicode strings (plain ASCII works as well).
-    
+
     Only the real name part of sender and recipient addresses may contain
     non-ASCII characters.
-    
+
     The email will be properly MIME encoded and delivered though SMTP to
     localhost port 25.  This is easy to change if you want something different.
-    
+
     The charset of the email will be the first one out of the list
     that can represent all the characters occurring in the email.
     """
@@ -91,7 +72,7 @@ def send(sender, recipient, subject, body, contenttype, when, extraheaders=None,
     # Header class is smart enough to try US-ASCII, then the charset we
     # provide, then fall back to UTF-8.
     header_charset = 'ISO-8859-1'
-    
+
     # We must choose the body charset manually
     for body_charset in CHARSET_LIST:
         try:
@@ -104,16 +85,16 @@ def send(sender, recipient, subject, body, contenttype, when, extraheaders=None,
     # Split real name (which is optional) and email address parts
     sender_name, sender_addr = parseaddr(sender)
     recipient_name, recipient_addr = parseaddr(recipient)
-    
+
     # We must always pass Unicode strings to Header, otherwise it will
     # use RFC 2047 encoding even on plain ASCII strings.
     sender_name = str(Header(unicode(sender_name), header_charset))
     recipient_name = str(Header(unicode(recipient_name), header_charset))
-    
+
     # Make sure email addresses do not contain non-ASCII characters
     sender_addr = sender_addr.encode('ascii')
     recipient_addr = recipient_addr.encode('ascii')
-    
+
     # Create the message ('plain' stands for Content-Type: text/plain)
     msg = MIMEText(body.encode(body_charset), contenttype, body_charset)
     msg['To'] = formataddr((recipient_name, recipient_addr))
@@ -123,7 +104,7 @@ def send(sender, recipient, subject, body, contenttype, when, extraheaders=None,
             msg[hdr] = Header(unicode(extraheaders[hdr], header_charset))
         except:
             msg[hdr] = Header(extraheaders[hdr])
-        
+
     fromhdr = formataddr((sender_name, sender_addr))
     msg['From'] = fromhdr
 
@@ -154,59 +135,9 @@ def send(sender, recipient, subject, body, contenttype, when, extraheaders=None,
     mailserver.append(folder,'',imaplib.Time2Internaldate(when), msg_as_string)
     return mailserver
 
-warn = sys.stderr
-
-
-unix = 0
-try:
-    import fcntl
-# A pox on SunOS file locking methods   
-    if (sys.platform.find('sunos') == -1): 
-        unix = 1
-except:
-    pass
-        
-socket_errors = []
-for e in ['error', 'gaierror']:
-    if hasattr(socket, e): socket_errors.append(getattr(socket, e))
-
 ### Utility Functions ###
 
-import threading
-class TimeoutError(Exception): pass
-
 class InputError(Exception): pass
-
-def timelimit(timeout, function):
-#    def internal(function):
-        def internal2(*args, **kw):
-            """
-            from http://aspn.activestate.com/ASPN/Cookbook/Python/Recipe/473878
-            """
-            class Calculator(threading.Thread):
-                def __init__(self):
-                    threading.Thread.__init__(self)
-                    self.result = None
-                    self.error = None
-                
-                def run(self):
-                    try:
-                        self.result = function(*args, **kw)
-                    except:
-                        self.error = sys.exc_info()
-            
-            c = Calculator()
-            c.setDaemon(True) # don't hold up exiting
-            c.start()
-            c.join(timeout)
-            if c.isAlive():
-                raise TimeoutError
-            if c.error:
-                raise c.error[0], c.error[1]
-            return c.result
-        return internal2
-#    return internal
-    
 
 def isstr(f): return isinstance(f, type('')) or isinstance(f, type(u''))
 def ishtml(t): return type(t) is type(())
@@ -220,10 +151,10 @@ def unu(s): # I / freakin' hate / that unicode
 def getContent(entry, HTMLOK=0):
     """Select the best content from an entry, deHTMLizing if necessary.
     If raw HTML is best, an ('HTML', best) tuple is returned. """
-    
+
     # How this works:
-    #  * We have a bunch of potential contents. 
-    #  * We go thru looking for our first choice. 
+    #  * We have a bunch of potential contents.
+    #  * We go thru looking for our first choice.
     #    (HTML or text, depending on HTMLOK)
     #  * If that doesn't work, we go thru looking for our second choice.
     #  * If that still doesn't work, we just take the first one.
@@ -232,43 +163,28 @@ def getContent(entry, HTMLOK=0):
     #  * Instead of just taking the first one
     #    pick the one in the "best" language.
     #  * HACK: hardcoded HTMLOK, should take a tuple of media types
-    
+
     conts = entry.get('content', [])
-    
+
     if entry.get('summary_detail', {}):
         conts += [entry.summary_detail]
-    
+
     if conts:
         if HTMLOK:
             for c in conts:
                 if contains(c.type, 'html'): return ('HTML', c.value)
-    
+
         if not HTMLOK: # Only need to convert to text if HTML isn't OK
             for c in conts:
                 if contains(c.type, 'html'):
                     return html2text(c.value)
-        
+
         for c in conts:
             if c.type == 'text/plain': return c.value
-    
-        return conts[0].value   
-    
+
+        return conts[0].value
+
     return ""
-
-def getID(entry):
-    """Get best ID from an entry."""
-    if TRUST_GUID:
-        if 'id' in entry and entry.id: 
-            # Newer versions of feedparser could return a dictionary
-            if type(entry.id) is DictType:
-                return entry.id.values()[0]
-
-            return entry.id
-
-    content = getContent(entry)
-    if content and content != "\n": return hashlib.sha1(unu(content)).hexdigest()
-    if 'link' in entry: return entry.link
-    if 'title' in entry: return hashlib.sha1(unu(entry.title)).hexdigest()
 
 def getName(r, entry):
     """Get the best name."""
@@ -278,7 +194,7 @@ def getName(r, entry):
     feed = r.feed
     if hasattr(r, "url") and r.url in OVERRIDE_FROM.keys():
         return OVERRIDE_FROM[r.url]
-    
+
     name = feed.get('title', '')
 
     if 'name' in entry.get('author_detail', []): # normally {} but py2.1
@@ -294,9 +210,8 @@ def getName(r, entry):
         if feed.author_detail.name:
             if name: name += ", "
             name += feed.author_detail.name
-    
-    return name
 
+    return name
 
 def getMungedFrom(r):
     """Generate a better From."""
@@ -304,13 +219,12 @@ def getMungedFrom(r):
     feed = r.feed
     if hasattr(r, "url") and r.url in OVERRIDE_FROM.keys():
         return OVERRIDE_FROM[r.url]
-    
+
     name = feed.get('title', 'unknown').lower()
     pattern = re.compile('[\W_]+',re.UNICODE)
     re.sub(pattern, '', name)
     name = "%s <%s@%s>" % (feed.get('title','Unnamed Feed'), name.replace(' ','_'), urlparse.urlparse(r.url).netloc)
     return name
-
 
 def validateEmail(email, planb):
     """Do a basic quality check on email address, but return planb if email doesn't appear to be well-formed"""
@@ -318,305 +232,96 @@ def validateEmail(email, planb):
     if len(email_parts) != 2:
         return planb
     return email
-    
+
 def getEmail(r, entry):
     """Get the best email_address. If the best guess isn't well-formed (something@somthing.com), use DEFAULT_EMAIL_FROM instead"""
-    
+
     feed = r.feed
-        
+
     if FORCE_FROM: return DEFAULT_EMAIL_FROM
-    
+
     if hasattr(r, "url") and r.url in OVERRIDE_EMAIL.keys():
         return validateEmail(OVERRIDE_EMAIL[r.url], DEFAULT_EMAIL_FROM)
-    
+
     if 'email' in entry.get('author_detail', []):
         return validateEmail(entry.author_detail.email, DEFAULT_EMAIL_FROM)
-    
+
     if 'email' in feed.get('author_detail', []):
         return validateEmail(feed.author_detail.email, DEFAULT_EMAIL_FROM)
-        
+
     if USE_PUBLISHER_EMAIL:
         if 'email' in feed.get('publisher_detail', []):
             return validateEmail(feed.publisher_detail.email, DEFAULT_EMAIL_FROM)
-        
+
         if feed.get("errorreportsto", ''):
             return validateEmail(feed.errorreportsto, DEFAULT_EMAIL_FROM)
-            
+
     if hasattr(r, "url") and r.url in DEFAULT_EMAIL.keys():
         return DEFAULT_EMAIL[r.url]
     return DEFAULT_EMAIL_FROM
 
-### Simple Database of Feeds ###
-
-class Feed:
-    def __init__(self, url, labels=None):
-            self.url = url
-            self.labels = labels
-            self.feed = feedparser.parse(self.url)
-            self.labels.append(self.feed['feed']['title'].strip())
-
-    def get_labels(self):
-        return self.labels
-
-    def get_entries(self):
-        entries=[]
-        for entry in self.feed["entries"]:
-            entries.append(entry)
-        return entries
-
-    def get_entries_ids(self):
-        ids=[]
-        for _id in self.get_entries():
-            ids.append(_id.get('id', ''))
-        return ids
-        # label = feed_getTitle(data).strip()
-    # if label == "" and url.startswith('http'):
-        # label = url[4:]
-    # return "".join( c for c in label if c in VALID_LABEL_CHAR)
-            
-            # self.url, self.etag, self.modified, self.seen = url, None, None, {}
-            # self.active = True
-            # self.to = to
-            # self.folder = folder
-
-def load(lock=1):
-    if not os.path.exists(feedfile):
-        print 'Feedfile "%s" does not exist.  If you\'re using r2e for the first time, you' % feedfile
-        print "have to run 'r2e new' first."
-        sys.exit(1)
-    try:
-        feedfileObject = open(feedfile, 'r')
-    except IOError, e:
-        print "Feedfile could not be opened: %s" % e
-        sys.exit(1)
-    feeds = pickle.load(feedfileObject)
-    
-    if lock:
-        locktype = 0
-        if unix:
-            locktype = fcntl.LOCK_EX
-            fcntl.flock(feedfileObject.fileno(), locktype)
-        #HACK: to deal with lock caching
-        feedfileObject = open(feedfile, 'r')
-        feeds = pickle.load(feedfileObject)
-        if unix: 
-            fcntl.flock(feedfileObject.fileno(), locktype)
-    if feeds: 
-        for feed in feeds[1:]:
-            if not hasattr(feed, 'active'): 
-                feed.active = True
-        
-    return feeds, feedfileObject
-
-def unlock(feeds, feedfileObject):
-    if not unix: 
-        pickle.dump(feeds, open(feedfile, 'w'))
-    else:   
-        fd = open(feedfile+'.tmp', 'w')
-        pickle.dump(feeds, fd)
-        fd.flush()
-        os.fsync(fd.fileno())
-        fd.close()
-        os.rename(feedfile+'.tmp', feedfile)
-        fcntl.flock(feedfileObject.fileno(), fcntl.LOCK_UN)
-
-#@timelimit(FEED_TIMEOUT)       
-def parse(url, etag, modified):
-    if PROXY == '':
-        return feedparser.parse(url, etag, modified)
-    else:
-        proxy = urllib2.ProxyHandler( {"http":PROXY} )
-        return feedparser.parse(url, etag, modified, handlers = [proxy])    
-    
-        
 ### Program Functions ###
 
-def add(add_list):
-    url = add_list[0]
-    for feed in _list(True):
-        if url in feed:
-            print "This feed already exists!"
-            return
+def feed_db_save(array):
+    os.remove(FEEDFILE_PATH)
 
+    for feed in array:
+        with open(FEEDFILE_PATH, 'a') as f:
+            line = feed[0]
+            for i in feed[1:]:
+                line += "; " + str(i)
+            f.write("%s\n" % line)
 
-    feed_options = [url]
-    d = Feed(url, add_list[1:])
-    _file = open(FEEDFILE_PATH, 'a')
-    feed_options.append(d.get_labels())
-    feed_options.append(FULLFEED)
-    v = "%s\n" %(feed_options)
-    _file.write(v.strip())
-    _file.close()
-    
-    if ADD_ARCHIVE_NEW_FEED:
-        t = "".join(x for x in url if x.isalnum())
-        path = os.path.join(ARCHIVE_PATH, t)
-        archive = open(path, 'a')
-        for i in d.get_entries():
-            # print(i.get('id', ''))
-            # exit()
-            archive.write("%s\n" % i.get('id', '').strip())
-        archive.close()
-
-def _list(array=False):
-    feeds = []
-    # print("Nr.)  url  labels  fullfeed")
-    # print("="*100)
-    for index, line in enumerate(open(FEEDFILE_PATH, 'r').readlines(), 1):
-        if line.strip() != "":
-            if array:
-                feeds.append(line.strip())
-            else:
-                print "%s.) %s" %(str(index), line.strip())
-    return feeds
-
-### HTML Parser for grabbing links and images ###
-
-from HTMLParser import HTMLParser
-class Parser(HTMLParser):
-    def __init__(self, tag = 'a', attr = 'href'):
-        HTMLParser.__init__(self)
-        self.tag = tag
-        self.attr = attr
-        self.attrs = []
-    def handle_starttag(self, tag, attrs):
-        if tag == self.tag:
-            attrs = dict(attrs)
-            if self.attr in attrs:
-                self.attrs.append(attrs[self.attr])
-
-
-### CSV dialect for parsing IMAP responses
-class mailboxlist(csv.excel):
-    delimiter = ' '
-
-
-csv.register_dialect('mailboxlist',mailboxlist)
-
-
-def uid(data):
-    m = re.match('\d+ \(UID (?P<uid>\d+)\)', data)
-    return m.group('uid')
-
-
-def run(num=None):
-    feeds, feedfileObject = load()
+def run(nosend, num=None):
+    feeds = _list(True)
     mailserver = None
     try:
+        """
         # We store the default to address as the first item in the feeds list.
         # Here we take it out and save it for later.
         default_to = ""
-        if feeds and isstr(feeds[0]): default_to = feeds[0]; ifeeds = feeds[1:] 
+        if feeds and isstr(feeds[0]): default_to = feeds[0]; ifeeds = feeds[1:]
         else: ifeeds = feeds
-        
-        if num: ifeeds = [feeds[num]]
+        """
+        if num:
+            ifeeds = [feeds[num]]
+        else:
+            ifeeds = feeds
         feednum = 0
-        
         for f in ifeeds:
-            try: 
+            try:
                 feednum += 1
-                if not f.active: continue
-                
-                if VERBOSE: print >>warn, 'I: Processing [%d] "%s"' % (feednum, f.url)
+                if VERBOSE: print >>warn, 'I: Processing [%d] "%s"' % (feednum, f[0])
                 r = {}
-                try:
-                    r = timelimit(FEED_TIMEOUT, parse)(f.url, f.etag, f.modified)
-                except TimeoutError:
-                    print >>warn, 'W: feed [%d] "%s" timed out' % (feednum, f.url)
+                r = feedparser.parse(f[0], f[2], f[3])
+                if r.get('status', None) == 304:
+                    print "skipped: %s" % f[0]
                     continue
-                
-                # Handle various status conditions, as required
-                if 'status' in r:
-                    if r.status == 301: f.url = r['url']
-                    elif r.status == 410:
-                        print >>warn, "W: feed gone; deleting", f.url
-                        feeds.remove(f)
-                        continue
-                
-                http_status = r.get('status', 200)
-                if VERBOSE > 1: print >>warn, "I: http status", http_status
-                http_headers = r.get('headers', {
-                  'content-type': 'application/rss+xml', 
-                  'content-length':'1'})
-                exc_type = r.get("bozo_exception", Exception()).__class__
-                if http_status != 304 and not r.entries and not r.get('version', ''):
-                    if http_status not in [200, 302]: 
-                        print >>warn, "W: error %d [%d] %s" % (http_status, feednum, f.url)
 
-                    elif contains(http_headers.get('content-type', 'rss'), 'html'):
-                        print >>warn, "W: looks like HTML [%d] %s"  % (feednum, f.url)
+                t = "".join(x for x in f[0] if x in VALID_CHAR)
+                path = os.path.join(ARCHIVE_PATH, t)
+                seen = open(path, 'r').readlines()
 
-                    elif http_headers.get('content-length', '1') == '0':
-                        print >>warn, "W: empty page [%d] %s" % (feednum, f.url)
-
-                    elif hasattr(socket, 'timeout') and exc_type == socket.timeout:
-                        print >>warn, "W: timed out on [%d] %s" % (feednum, f.url)
-                    
-                    elif exc_type == IOError:
-                        print >>warn, 'W: "%s" [%d] %s' % (r.bozo_exception, feednum, f.url)
-                    
-                    elif hasattr(feedparser, 'zlib') and exc_type == feedparser.zlib.error:
-                        print >>warn, "W: broken compression [%d] %s" % (feednum, f.url)
-                    
-                    elif exc_type in socket_errors:
-                        exc_reason = r.bozo_exception.args[1]
-                        print >>warn, "W: %s [%d] %s" % (exc_reason, feednum, f.url)
-
-                    elif exc_type == urllib2.URLError:
-                        if r.bozo_exception.reason.__class__ in socket_errors:
-                            exc_reason = r.bozo_exception.reason.args[1]
-                        else:
-                            exc_reason = r.bozo_exception.reason
-                        print >>warn, "W: %s [%d] %s" % (exc_reason, feednum, f.url)
-                    
-                    elif exc_type == AttributeError:
-                        print >>warn, "W: %s [%d] %s" % (r.bozo_exception, feednum, f.url)
-                    
-                    elif exc_type == KeyboardInterrupt:
-                        raise r.bozo_exception
-                        
-                    elif r.bozo:
-                        print >>warn, 'E: error in [%d] "%s" feed (%s)' % (feednum, f.url, r.get("bozo_exception", "can't process"))
-
-                    else:
-                        print >>warn, "=== rss2email encountered a problem with this feed ==="
-                        print >>warn, "=== See the rss2email FAQ at http://www.allthingsrss.com/rss2email/ for assistance ==="
-                        print >>warn, "=== If this occurs repeatedly, send this to lindsey@allthingsrss.com ==="
-                        print >>warn, "E:", r.get("bozo_exception", "can't process"), f.url
-                        print >>warn, r
-                        print >>warn, "rss2email", __version__
-                        print >>warn, "feedparser", feedparser.__version__
-                        print >>warn, "html2text", h2t.__version__
-                        print >>warn, "Python", sys.version
-                        print >>warn, "=== END HERE ==="
-                    continue
-                
                 r.entries.reverse()
-                
                 for entry in r.entries:
-                    id = getID(entry)
-                    
-                    # If TRUST_GUID isn't set, we get back hashes of the content.
-                    # Instead of letting these run wild, we put them in context
-                    # by associating them with the actual ID (if it exists).
-                    
-                    frameid = entry.get('id')
-                    if not(frameid): frameid = id
-                    if type(frameid) is DictType:
-                        frameid = frameid.values()[0]
-                    
-                    # If this item's ID is in our database
-                    # then it's already been sent
-                    # and we don't need to do anything more.
-                    
-                    if frameid in f.seen:
-                        if f.seen[frameid] == id: continue
+                    uid = entry.get('id', entry.get('link', entry.get('title', None)))
+                    if uid+'\n' in seen:continue
+                    # new entry:
+                    title = entry.get('title', None).strip()
+                    puplished = entry.get('published', "datum+zeit")
+                    author = entry.get('author', f[4])
+                    article = entry.get('content', None)
+                    article_value = article[0].get('value', None)
+                    print title
+                    print puplished
+                    print author
+                    print article
+                    print article_value
 
-                    if not (f.to or default_to):
-                        print "No default email address defined. Please run 'r2e email emailaddress'"
-                        print "Ignoring feed %s" % f.url
-                        break
-                    
+                    with open(path, 'a') as f:
+                        f.write("%s\n" % uid)
+                    continue
+
                     if 'title_detail' in entry and entry.title_detail:
                         title = entry.title_detail.value
                         if contains(entry.title_detail.type, 'html'):
@@ -625,25 +330,25 @@ def run(num=None):
                         title = getContent(entry)[:70]
 
                     title = title.replace("\n", " ").strip()
-                    
+
                     when = time.gmtime()
 
                     if DATE_HEADER:
                         for datetype in DATE_HEADER_ORDER:
                             kind = datetype+"_parsed"
                             if kind in entry and entry[kind]: when = entry[kind]
-                        
+
                     link = entry.get('link', "")
-                    
+
                     from_addr = getEmail(r, entry)
-                    
+
                     name = h2t.unescape(getName(r, entry))
                     fromhdr = formataddr((name, from_addr,))
                     tohdr = (f.to or default_to)
                     subjecthdr = title
                     datehdr = time.strftime("%a, %d %b %Y %H:%M:%S -0000", when)
                     useragenthdr = "rss2email"
-                    
+
                     # Add post tags, if available
                     tagline = ""
                     if 'tags' in entry:
@@ -654,16 +359,16 @@ def run(num=None):
                                 taglist.append(tag['term'])
                         if taglist:
                             tagline = ",".join(taglist)
-                    
-                    extraheaders = {'Date': datehdr, 'User-Agent': useragenthdr, 'X-RSS-Feed': f.url, 'Message-ID': '<%s>' % hashlib.sha1(id.encode('utf-8')).hexdigest(), 'X-RSS-ID': id, 'X-RSS-URL': link, 'X-RSS-TAGS' : tagline, 'X-MUNGED-FROM': getMungedFrom(r), 'References': ''}
+
+                    extraheaders = {'Date': datehdr, 'User-Agent': useragenthdr, 'X-RSS-Feed': f[0], 'Message-ID': '<%s>' % hashlib.sha1(id.encode('utf-8')).hexdigest(), 'X-RSS-ID': id, 'X-RSS-URL': link, 'X-RSS-TAGS' : tagline, 'X-MUNGED-FROM': getMungedFrom(r), 'References': ''}
                     if BONUS_HEADER != '':
                         for hdr in BONUS_HEADER.strip().splitlines():
                             pos = hdr.strip().find(':')
                             if pos > 0:
                                 extraheaders[hdr[:pos]] = hdr[pos+1:].strip()
                             else:
-                                print >>warn, "W: malformed BONUS HEADER", BONUS_HEADER 
-                    
+                                print >>warn, "W: malformed BONUS HEADER", BONUS_HEADER
+
                     entrycontent = getContent(entry, HTMLOK=HTML_MAIL)
                     contenttype = 'plain'
                     content = ''
@@ -671,7 +376,7 @@ def run(num=None):
                         extraheaders['References'] += ''.join([' <%s>' % hashlib.sha1(t.strip().encode('utf-8')).hexdigest() for t in tagline.split(',')])
                     if USE_CSS_STYLING and HTML_MAIL:
                         contenttype = 'html'
-                        content = "<html>\n" 
+                        content = "<html>\n"
                         content += '<head><meta http-equiv="Content-Type" content="text/html"><style>' + STYLE_SHEET + '</style></head>\n'
                         content += '<body style="word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space;">\n'
                         content += '<div id="entry">\n'
@@ -679,16 +384,8 @@ def run(num=None):
                         content += '><a href="'+link+'">'+subjecthdr+'</a></h1>\n'
                         if ishtml(entrycontent):
                             body = entrycontent[1].strip()
-                            if SUMMARIZE:
-                                content += '<div class="summary">%s</div>' % (summarize(html2text(body, plaintext=True), SUMMARIZE) + "<hr>")
                         else:
                             body = entrycontent.strip()
-                            if SUMMARIZE:
-                                content += '<div class="summary">%s</div>' % (summarize(body, SUMMARIZE) + "<hr>")
-                        if THREAD_ON_LINKS:
-                            parser = Parser()
-                            parser.feed(body)
-                            extraheaders['References'] += ''.join([' <%s>' % hashlib.sha1(h.strip().encode('utf-8')).hexdigest() for h in parser.attrs])
                         if INLINE_IMAGES_DATA_URI:
                             parser = Parser(tag='img', attr='src')
                             parser.feed(body)
@@ -704,7 +401,7 @@ def run(num=None):
                                 except:
                                     print >>warn, "Could not load image: %s" % src
                                     pass
-                        if body != '':  
+                        if body != '':
                             content += '<div id="body">\n' + body + '</div>\n'
                         content += '\n<p class="footer">URL: <a href="'+link+'">'+link+'</a>'
                         if hasattr(entry,'enclosures'):
@@ -724,15 +421,15 @@ def run(num=None):
                                     content += '<br/>Via: <a href="'+extraurl+'">'+viatitle+'</a>\n'
                         content += '</p></div>\n'
                         content += "\n\n</body></html>"
-                    else:   
+                    else:
                         if ishtml(entrycontent):
                             contenttype = 'html'
-                            content = "<html>\n" 
-                            content = ("<html><body>\n\n" + 
+                            content = "<html>\n"
+                            content = ("<html><body>\n\n" +
                                        '<h1><a href="'+link+'">'+subjecthdr+'</a></h1>\n\n' +
                                        entrycontent[1].strip() + # drop type tag (HACK: bad abstraction)
                                        '<p>URL: <a href="'+link+'">'+link+'</a></p>' )
-                                       
+
                             if hasattr(entry,'enclosures'):
                                 for enclosure in entry.enclosures:
                                     if enclosure.url != "":
@@ -741,7 +438,7 @@ def run(num=None):
                                 for extralink in entry.links:
                                     if ('rel' in extralink) and extralink['rel'] == u'via':
                                         content += 'Via: <a href="'+extralink['href']+'">'+extralink['title']+'</a><br/>\n'
-                                                                
+
                             content += ("\n</body></html>")
                         else:
                             content = entrycontent.strip() + "\n\nURL: "+link
@@ -755,9 +452,10 @@ def run(num=None):
                                         content += '<a href="'+extralink['href']+'">Via: '+extralink['title']+'</a>\n'
 
                     mailserver = send(fromhdr, tohdr, subjecthdr, content, contenttype, when, extraheaders, mailserver, f.folder)
-            
+
                     f.seen[frameid] = id
-                    
+
+                continue
                 f.etag, f.modified = r.get('etag', None), r.get('modified', None)
             except (KeyboardInterrupt, SystemExit):
                 raise
@@ -765,7 +463,7 @@ def run(num=None):
                 print >>warn, "=== rss2email encountered a problem with this feed ==="
                 print >>warn, "=== See the rss2email FAQ at http://www.allthingsrss.com/rss2email/ for assistance ==="
                 print >>warn, "=== If this occurs repeatedly, send this to lindsey@allthingsrss.com ==="
-                print >>warn, "E: could not parse", f.url
+                print >>warn, "E: could not parse", f[0]
                 traceback.print_exc(file=warn)
                 print >>warn, "rss2email", __version__
                 print >>warn, "feedparser", feedparser.__version__
@@ -774,8 +472,7 @@ def run(num=None):
                 print >>warn, "=== END HERE ==="
                 continue
 
-    finally:        
-        unlock(feeds, feedfileObject)
+    finally:
         if mailserver:
             if IMAP_MARK_AS_READ:
                 for folder in IMAP_MARK_AS_READ:
@@ -815,109 +512,160 @@ def run(num=None):
             except:
                 mailserver.logout()
 
+def add(add_list):
+    valid_char = VALID_CHAR + ".-_/ "
 
-def opmlexport():
-    import xml.sax.saxutils
-    feeds, feedfileObject = load(lock=0)
-    
-    if feeds:
-        print '<?xml version="1.0" encoding="UTF-8"?>\n<opml version="1.0">\n<head>\n<title>rss2email OPML export</title>\n</head>\n<body>'
-        for f in feeds[1:]:
-            url = xml.sax.saxutils.escape(f.url)
-            print '<outline type="rss" text="%s" xmlUrl="%s"/>' % (url, url)
-        print '</body>\n</opml>'
+    feeds = _list(True)
+    for feed in feeds:
+        if feed[0] == add_list[0]:
+            print "This feed already exists!"
+            exit(1)
 
-def opmlimport(importfile):
-    importfileObject = None
-    print 'Importing feeds from', importfile
-    if not os.path.exists(importfile):
-        print 'OPML import file "%s" does not exist.' % feedfile
-    try:
-        importfileObject = open(importfile, 'r')
-    except IOError, e:
-        print "OPML import file could not be opened: %s" % e
-        sys.exit(1)
-    try:
-        import xml.dom.minidom
-        dom = xml.dom.minidom.parse(importfileObject)
-        newfeeds = dom.getElementsByTagName('outline')
-    except:
-        print 'E: Unable to parse OPML file'
-        sys.exit(1)
+    d = feedparser.parse(add_list[0])
+    labels = "".join(x for x in d['feed'].get('title', None) if x in valid_char) # get the Mainlabel(websitetitle)
+    for l in add_list[1:]: #add the other labels
+        labels += "; " + "".join(x for x in l if x in valid_char)
+    feeds.append([add_list[0], FULLFEED, d.get('etag', None), d.get('modified', None), labels])
+    feed_db_save(feeds)
 
-    feeds, feedfileObject = load(lock=1)
-    
-    import xml.sax.saxutils
-    
-    for f in newfeeds:
-        if f.hasAttribute('xmlUrl'):
-            feedurl = f.getAttribute('xmlUrl')
-            print 'Adding %s' % xml.sax.saxutils.unescape(feedurl)
-            feeds.append(Feed(feedurl, None))
-            
-    unlock(feeds, feedfileObject)
+    if ADD_ARCHIVE_NEW_FEED:
+        t = "".join(x for x in add_list[0] if x in VALID_CHAR)
+        path = os.path.join(ARCHIVE_PATH, t)
+        with open(path, 'a') as f:
+            for item in d.get('entries', None):
+                f.write("%s\n" % item.get('id', item.get('title', '')))
 
-def delete(n):
-    feeds, feedfileObject = load()
-    if (n == 0) and (feeds and isstr(feeds[0])):
-        print >>warn, "W: ID has to be equal to or higher than 1"
-    elif n >= len(feeds):
-        print >>warn, "W: no such feed"
+def _list(array=False): #is also used to load the db!
+    feeds = []
+    # print("Nr.)  url  labels  fullfeed")
+    # print("="*100)
+    for index, l in enumerate(open(FEEDFILE_PATH, 'r').readlines(), 1):
+        line = l.strip()
+        if line != "":
+            v = line.split('; ')
+            if array:
+                feeds.append(v)
+            else:
+                labels=v[4]
+                for l in v[5:]:
+                    labels += ", " + l
+                print "%s.) %s [%s] %s" %(str(index), v[0].strip(), labels, v[1])
+    if array:
+        return feeds
+
+def reset(nr):
+    nr-=1
+    feeds=_list(True)
+    if nr < 0:
+        print "ID has to be equale to or higher than 1"
+    elif nr > len(feeds):
+        print "No such Feed"
     else:
-        print >>warn, "W: deleting feed %s" % feeds[n].url
-        feeds = feeds[:n] + feeds[n+1:]
-        if n != len(feeds):
-            print >>warn, "W: feed IDs have changed, list before deleting again"
-    unlock(feeds, feedfileObject)
-    
-def toggleactive(n, active):
-    feeds, feedfileObject = load()
-    if (n == 0) and (feeds and isstr(feeds[0])):
-        print >>warn, "W: ID has to be equal to or higher than 1"
-    elif n >= len(feeds):
-        print >>warn, "W: no such feed"
+        url = feeds[nr][0]
+        if url.startswith('#'):
+            url = url[2:]
+        t = "".join(x for x in url if x in VALID_CHAR)
+        path = os.path.join(ARCHIVE_PATH, t)
+        if os.path.exists(path):
+            os.remove(path)
+            print('The feed "%s" was sucessfull reseted!' % url)
+        open(path, 'w').close()
+
+def toggleactive(nr, mode):
+    nr -= 1
+    feeds = _list(True)
+    if nr < 0:
+        print "ID has to be equale to or higher than 1"
+    elif nr >= len(feeds):
+        print "No such Feed"
     else:
-        action = ('Pausing', 'Unpausing')[active]
-        print >>warn, "%s feed %s" % (action, feeds[n].url)
-        feeds[n].active = active
-    unlock(feeds, feedfileObject)
-    
-def reset():
-    feeds, feedfileObject = load()
-    if feeds and isstr(feeds[0]):
-        ifeeds = feeds[1:]
-    else: ifeeds = feeds
-    for f in ifeeds:
-        if VERBOSE: print "Resetting %d already seen items" % len(f.seen)
-        f.seen = {}
-        f.etag = None
-        f.modified = None
-    
-    unlock(feeds, feedfileObject)
-    
+        feed = feeds[nr]
+        if mode:
+            if feed[0].startswith('#'):
+                feeds[nr][0] = feed[0][2:]
+            else:
+                print "der angegebene feed war nicht deaktiviert"
+        else:
+            if not feed[0].startswith('#'):
+                # print feeds[nr]
+                feeds[nr][0] = "# %s" % feed[0]
+            else:
+                print "der angegebene feed war nicht aktiviert"
+
+        feed_db_save(feeds)
+
+def delete(nr):
+    nr-=1
+    feeds = _list(True)
+    if nr < 0:
+        print "ID has to be equale to or higher than 1"
+    elif nr >= len(feeds):
+        print "No such Feed"
+    else:
+        url = feeds[nr][0]
+        if url.startswith('#'):
+            url = url[2:]
+        t = "".join(x for x in url if x in VALID_CHAR)
+        path = os.path.join(ARCHIVE_PATH, t)
+        if os.path.exists(path):
+            os.remove(path)
+
+        del feeds[nr]
+        # print feeds
+        feed_db_save(feeds)
+        print('The feed "%s" was sucessfull deleted!' % url)
+
+
+### HTML Parser for grabbing links and images ###
+
+from HTMLParser import HTMLParser
+class Parser(HTMLParser):
+    def __init__(self, tag = 'a', attr = 'href'):
+        HTMLParser.__init__(self)
+        self.tag = tag
+        self.attr = attr
+        self.attrs = []
+    def handle_starttag(self, tag, attrs):
+        if tag == self.tag:
+            attrs = dict(attrs)
+            if self.attr in attrs:
+                self.attrs.append(attrs[self.attr])
+
+
+### CSV dialect for parsing IMAP responses
+class mailboxlist(csv.excel):
+    delimiter = ' '
+
+
+csv.register_dialect('mailboxlist',mailboxlist)
+
+
+def uid(data):
+    m = re.match('\d+ \(UID (?P<uid>\d+)\)', data)
+    return m.group('uid')
+
 def email(addr):
     feeds, feedfileObject = load()
     if feeds and isstr(feeds[0]): feeds[0] = addr
     else: feeds = [addr] + feeds
-    unlock(feeds, feedfileObject)
 
 if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     #parser.add_argument("-c", "--configdir", help="Run with <dir> as config directory", metavar="<dir>")
     # parser.add_argument("-v", "--verbose", action="store_true")
-    #parser.add_argument("--no-send", help="Only load the feed, without sending them", action="store_true")
+    parser.add_argument("--no-send", help="Only load the feed, without sending them", action="store_true")
     parser.add_argument("--add", help="Add a Feedurl to the FEEDFILE_PATH", metavar="feedurl (LABELS)", nargs="+")
     parser.add_argument("-l", "--list", action="store_true")
-    # parser.add_argument("-d", "--delete", help="Delete an Feedurl", metavar="<nr>", type=int)
-    # parser.add_argument("--reset", help="Reset an Feed-Archive-File", metavar="<nr>", type=int)
-    # parser.add_argument("--enable", help="Enable a Feed", metavar="<nr>", type=int)
-    # parser.add_argument("--disable", help="Disable a Feed", metavar="<nr>", type=int)
+    parser.add_argument("-d", "--delete", help="Delete an Feedurl", metavar="<nr>", type=int)
+    parser.add_argument("--reset", help="Reset an Feed-Archive-File", metavar="<nr>", type=int)
+    parser.add_argument("--enable", help="Enable a Feed", metavar="<nr>", type=int)
+    parser.add_argument("--disable", help="Disable a Feed", metavar="<nr>", type=int)
+    parser.add_argument("-V", "--version", action='version', version='%(prog)s {version}'.format(version=__version__))
     args = parser.parse_args()
 
     if not os.path.exists(FEEDFILE_PATH):
         open(FEEDFILE_PATH,"w").close()
-    elif not os.path.exists(ARCHIVE_PATH):
+    if not os.path.exists(ARCHIVE_PATH):
         os.makedirs(ARCHIVE_PATH)
 
     if GMAIL_PASS == "" or GMAIL_USER == "":
@@ -926,81 +674,15 @@ Please edit the config file to your need and start the tool again!"""
     else:
         if args.list:
             _list()
-        # elif args.delete:
-            # delete(args.delete)
-        # elif args.enable:
-            # toggleactive(args.enable, True)
-        # elif args.disable:
-            # toggleactive(args.disable, False)
-        # elif args.reset:
-            # reset(args.reset)
+        elif args.delete >= 0:
+            delete(args.delete)
+        elif args.enable >= 0:
+            toggleactive(args.enable, True)
+        elif args.disable >= 0:
+            toggleactive(args.disable, False)
+        elif args.reset >= 0:
+            reset(args.reset)
         elif args.add:
             add(args.add)
-        # else:
-            # run(args.verbose)
-
-    
-    # args = sys.argv
-    # try:
-        # if len(args) < 3: raise InputError, "insufficient args"
-        # feedfile, action, args = args[1], args[2], args[3:]
-        
-        # if action == "run": 
-            # if args and args[0] == "--no-send":
-                # def send(sender, recipient, subject, body, contenttype, when, extraheaders=None, mailserver=None, folder=None):
-                    # if VERBOSE: print 'Not sending:', unu(subject)
-
-            # if args and args[-1].isdigit(): run(int(args[-1]))
-            # else: run()
-
-        # elif action == "email":
-            # if not args:
-                # raise InputError, "Action '%s' requires an argument" % action
-            # else:
-                # email(args[0])
-
-        # elif action == "add": add(*args)
-
-        # elif action == "new": 
-            # if len(args) == 1: d = [args[0]]
-            # else: d = []
-            # pickle.dump(d, open(feedfile, 'w'))
-
-        # elif action == "list": list()
-
-        # elif action in ("help", "--help", "-h"): print __doc__
-
-        # elif action == "delete":
-            # if not args:
-                # raise InputError, "Action '%s' requires an argument" % action
-            # elif args[0].isdigit():
-                # delete(int(args[0]))
-            # else:
-                # raise InputError, "Action '%s' requires a number as its argument" % action
-
-        # elif action in ("pause", "unpause"):
-            # if not args:
-                # raise InputError, "Action '%s' requires an argument" % action
-            # elif args[0].isdigit():
-                # active = (action == "unpause")
-                # toggleactive(int(args[0]), active)
-            # else:
-                # raise InputError, "Action '%s' requires a number as its argument" % action
-
-        # elif action == "reset": reset()
-
-        # elif action == "opmlexport": opmlexport()
-
-        # elif action == "opmlimport": 
-            # if not args:
-                # raise InputError, "OPML import '%s' requires a filename argument" % action
-            # opmlimport(args[0])
-
-        # else:
-            # raise InputError, "Invalid action"
-        
-    # except InputError, e:
-        # print "E:", e
-        # print
-        # print __doc__
-
+        else:
+            run(args.no_send)
