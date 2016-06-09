@@ -1,8 +1,10 @@
-v0.5(2015-08)
+v0.5(2016-06)
     * Deleted.: unneeded smtp-code+smtp-config
-    * Changed.: Var imap to var gmail 
-    * Deleted.: 
     * Added...: Error Msg, if config file didn't exists
+
+    * Changed.: 
+    * Deleted.: 
+
     * Fixed...:
     * Improved:
 
