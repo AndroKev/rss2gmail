@@ -1,126 +1,16 @@
-### Options for configuring rss2email ###
+### Options for configuring rss2gmail ###
 
-# The email address messages are from by default:
-DEFAULT_FROM = "bozo@dev.null.invalid"
+# Program Options:
+FEEDFILE_PATH = "feed.txt"# Path to the feedfile:
+ARCHIVE_PATH = "archive" # Path to the Folder where we store the loaded items:
 
-# 1: Send text/html messages when possible.
-# 0: Convert HTML to plain text.
-HTML_MAIL = 1
+# GMAIL OPTIONS:
+GMAIL_USER = ''  # set GMAIL username here
+GMAIL_PASS = ''  # set GMAIL password here
 
-# 1: Only use the DEFAULT_FROM address.
-# 0: Use the email address specified by the feed, when possible.
-FORCE_FROM = 0
+MAIN_GMAIL_FOLDER  = "RSS"     # Change the default imap folder, Mainfolder=INBOX
+IMAGES_AS_ATTACHMETNS = False # Add images as attachments (offline)
 
-# 1: Receive one email per post.
-# 0: Receive an email every time a post changes.
-TRUST_GUID = 1
-
-# 1: Generate Date header based on item's date, when possible.
-# 0: Generate Date header based on time sent.
-DATE_HEADER = 1
-
-# A tuple consisting of some combination of
-# ('issued', 'created', 'modified', 'expired')
-# expressing ordered list of preference in dates 
-# to use for the Date header of the email.
-DATE_HEADER_ORDER = ('modified', 'issued', 'created')
-
-# 1: Apply Q-P conversion (required for some MUAs).
-# 0: Send message in 8-bits.
-# http://cr.yp.to/smtp/8bitmime.html
-#DEPRECATED 
-QP_REQUIRED = 0
-#DEPRECATED 
-	
-# 1: Name feeds as they're being processed.
-# 0: Keep quiet.
-VERBOSE = 0
-
-# 1: Use the publisher's email if you can't find the author's.
-# 0: Just use the DEFAULT_FROM email instead.
-USE_PUBLISHER_EMAIL = 1
-
-# 1: Use SMTP_SERVER to send mail.
-# 0: Call /usr/sbin/sendmail to send mail.
-SMTP_SEND = 1
-
-SMTP_SERVER = "smtp.yourisp.net:25"
-AUTHREQUIRED = 0 # if you need to use SMTP AUTH set to 1
-SMTP_USER = 'username'  # for SMTP AUTH, set SMTP username here
-SMTP_PASS = 'password'  # for SMTP AUTH, set SMTP password here
-
-# Connect to the SMTP server using SSL
-
-SMTP_SSL = 0
-
-# 1: Use IMAP_SERVER to deliver mail and ignore SMTP settings.
-# 0: Use SMTP
-
-IMAP_SEND = 1
-IMAP_SERVER = "smtp.yourisp.net:143"
-IMAP_USER = 'username'  # set IMAP username here
-IMAP_PASS = 'password'  # set IMAP password here
-
-# Connect to the IMAP server using SSL
-IMAP_SSL = 1
-
-# Synthesise From: addresses based on feed name and domain
-IMAP_MUNGE_FROM = 1
-IMAP_OVERRIDE_TO = 'Me <me@localhost>'
-
-# Generate References: headers based on item tags and/or URLs in feed content
-THREAD_ON_TAGS = 1
-THREAD_ON_LINKS = 1
-
-# Include inline images as a data: URI (not supported in MUAs like the mobile Gmail app, but works great on iOS and Mac)
-INLINE_IMAGES_DATA_URI = 0
-
-# Move read messages to a specific folder
-IMAP_MOVE_READ_TO = False
-
-# Mark all messages as read in the following folders
-IMAP_MARK_AS_READ = None # ['Trash']
-
-# Set this to add a bonus header to all emails (start with '\n').
-BONUS_HEADER = ''
-# Example: BONUS_HEADER = '\nApproved: joe@bob.org'
-
-# Set this to override From addresses. Keys are feed URLs, values are new titles.
-OVERRIDE_FROM = {}
-
-# Set this to override From email addresses. Keys are feed URLs, values are new emails.
-OVERRIDE_EMAIL = {}
-
-DEFAULT_EMAIL = {}
-
-# Only use the email from address rather than friendly name plus email address
-NO_FRIENDLY_NAME = 0
-
-# Set this to override the timeout (in seconds) for feed server response
-FEED_TIMEOUT = 60
-
-# Optional CSS styling
-USE_CSS_STYLING = 1
-STYLE_SHEET='img {max-width: 100% !important; height: auto;} body, #body {font-size: 12pt; word-wrap: break-word; -webkit-nbsp-mode: space; -webkit-line-break: after-white-space; font-family: Georgia, Times New Roman, Times, serif;} a:link {color: #0000cc} h1.header a {font-weight: normal; text-decoration: none; color: black;} .summary {font-size: 80%; font-style: italic;}'
-
-# If you have an HTTP Proxy set this in the format 'http://your.proxy.here:8080/'
-PROXY=""
-
-# To most correctly encode emails with international characters, we iterate through the list below and use the first character set that works
-# Eventually (and theoretically) ISO-8859-1 and UTF-8 are our catch-all failsafes
-CHARSET_LIST='US-ASCII', 'BIG5', 'ISO-2022-JP', 'ISO-8859-1', 'UTF-8'
-
-# Use Unicode characters instead of their ascii pseudo-replacements
-UNICODE_SNOB = 0
-
-# Put the links after each paragraph instead of at the end.
-LINKS_EACH_PARAGRAPH = 0
-
-# Wrap long lines at position. 0 for no wrapping. (Requires Python 2.3.)
-BODY_WIDTH = 0
-
-# Change the default imap folder
-DEFAULT_IMAP_FOLDER = "INBOX"
-
-# Whether to summarize the body or not. Set it to the number of sentences you require.
-SUMMARIZE = 0
+# FEED Options:
+ADD_ARCHIVE_NEW_FEED  = True  # Add links to archive when adding a new feed?
+DEFAULT_EMAIL_FROM = None # The email address messages are from by default(useful to always show images in the gmail-android-app)
