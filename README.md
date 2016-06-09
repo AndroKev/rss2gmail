@@ -12,5 +12,6 @@ Based on [rcarmo](https://github.com/rcarmo/rss2imap)
 - support subfolder(labels)
 
 # Special Thanks:
-- [rcarmo](https://github.com/rcarmo/rss2imap)
+- [Original Idee](http://rss2email.infogami.com)
+- [Forked from rcarmo](https://github.com/rcarmo/rss2imap)
 - [wking](https://github.com/wking/rss2email/)

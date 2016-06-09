@@ -23,9 +23,7 @@ import os
 import sys
 import time
 import re
-import base64
 import argparse
-from datetime import datetime, timedelta
 import urllib2
 
 import imaplib

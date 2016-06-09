@@ -1,7 +1,7 @@
 ### Options for configuring rss2gmail ###
 
 # Program Options:
-FEEDFILE_PATH = "feed.txt"# Path to the feedfile:
+FEEDFILE_PATH = "feed.txt" # Path to the feedfile:
 ARCHIVE_PATH = "archive" # Path to the Folder where we store the loaded items:
 
 # GMAIL OPTIONS:
