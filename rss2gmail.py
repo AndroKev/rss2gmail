@@ -33,7 +33,6 @@ from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 from email.header import Header
 import feedparser
-from HTMLParser import HTMLParser
 
 feedparser.USER_AGENT = "rss2gmail/" + __version__ + " +https://github.com/AndroKev/rss2gmail"
 VALID_CHAR = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
@@ -128,22 +127,6 @@ def contains(a, b):
     return a.find(b) != -1
 
 
-# Parsing Utilities
-
-class Parser(HTMLParser):
-    def __init__(self, tag='a', attr='href'):
-        HTMLParser.__init__(self)
-        self.tag = tag
-        self.attr = attr
-        self.attrs = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag == self.tag:
-            attrs = dict(attrs)
-            if self.attr in attrs:
-                self.attrs.append(attrs[self.attr])
-
-
 def getContent(entry):
 
     conts = entry.get('content', [])
@@ -209,7 +192,7 @@ def run(nosend, num=None):
 
             print 'I: Processing [%d/%d] "%s"' % (feednum, len(ifeeds), f[0])
             r = {}
-            r = feedparser.parse(f[0], f[2], f[3])
+            r = feedparser.parse(f[0], f[1], f[2])
             if r.get('status', None) == 304:
                 if VERBOSE:
                     print "  skipped: %s (nothing changed)" % f[0]
@@ -237,11 +220,19 @@ def run(nosend, num=None):
                     if not nosend:
                         title = entry.get('title', None).strip()
                         puplished = entry.get('published_parsed', time.localtime())
-                        author = getFromEmail(r, entry, f[4])
+                        updated = entry.get('updated_parsed', time.localtime())
+
+                        if puplished != updated:
+                            print "          UPDATED-ARTICEL!!!"
+                            update = True
+                        else:
+                            update = False
+
+                        author = getFromEmail(r, entry, f[3])
                         article_link = entry.get('link', r['feed'].get('link', ""))
                         body = '<h1 class="header"><a href="%s">%s</a></h1>\n' % (article_link, title)
                         body += getContent(entry)
-                        mail = send(author, title, puplished, f[4:], body, mail)
+                        mail = send(author, title, puplished, f[3:], body, mail)
 
                     with open(path, 'a') as _file:
                         _file.write("%s\n" % uid.encode('utf-8'))
@@ -250,7 +241,7 @@ def run(nosend, num=None):
                 print >>warn, "There was an Error on entry %s on Feed: %s" % (entry, f[0])
                 continue
 
-            f[2], f[3] = r.get('etag', None), r.get('modified', None)
+            f[1], f[2] = r.get('etag', None), r.get('modified', None)
 
         print 'Found %d new articles!' % articlenum
         feed_db_save(ifeeds)
@@ -281,7 +272,7 @@ def add(add_list):
         for l in add_list[1:]:  # add the other labels
             labels += "; " + "".join(x for x in l if x in valid_char)
 
-        feeds.append([add_list[0], FULLFEED, d.get('etag', None), d.get('modified', None), labels])
+        feeds.append([add_list[0], d.get('etag', None), d.get('modified', None), labels])
         feed_db_save(feeds)
 
         if ADD_ARCHIVE_NEW_FEED:
