@@ -52,7 +52,7 @@ def mail_login():
         sys.exit(1)
 
 
-def send(author, subject, published, labels, content, mail=None):
+def send(author, subject, article_link, published, labels, content, mail=None):
 
     if not mail:
         mail = mail_login()
@@ -62,34 +62,47 @@ def send(author, subject, published, labels, content, mail=None):
     msg['From'] = author
     msg['To'] = GMAIL_USER
 
-    if IMAGES_AS_ATTACHMETNS:
+    if USE_IMAGES >= 0 or SUMMARIZE > 0:
         parser = Parser(tag='img', attr='src')
         parser.feed(content)
         img_nr = 0
 
         for src in parser.attrs:
             img_nr += 1
-            try:
-                if VERBOSE:
-                    print "    Load image: %s" % src
-                req = urllib2.Request(src.encode('utf-8'), headers={'User-Agent': 'Mozilla/5.0 (Windows; U; Windows NT 5.1; it; rv:1.8.1.11) Gecko/20071127 Firefox/2.0.0.11'})
-                img_data = urllib2.urlopen(req)
-                try:
-                    img = MIMEImage(img_data.read())
-                except:
-                    img = MIMEImage(img_data.read(), _subtype="png")
-                # WORKAROUND: because the gmail-android-app dosen't load contend-id-images, it replace the <img/> with an image_name and add the image as an attachment!
-                content = re.sub(r'<img.*src="%s".*?/>' % re.escape(src), 'Bild_%d' % img_nr, content)
-                img.add_header('Content-Disposition', 'attachment; filename="Bild_%d"' % img_nr)
-                msg.attach(img)
-            except:
-                print >>warn, "Could not load image: %s" % src.encode('utf-8')
-                pass
 
-    msg.attach(MIMEText(content, 'html', 'utf-8'))
+            if USE_IMAGES == 0 or SUMMARIZE > 0:
+                content = re.sub(r'<img.*src="%s".*?/>' % re.escape(src), '', content)
+
+            elif USE_IMAGES == 2:
+                try:
+                    if VERBOSE:
+                        print "    Load image: %s" % src
+                    req = urllib2.Request(src.encode('utf-8'), headers={'User-Agent': 'Mozilla/5.0 (Windows; U; Windows NT 5.1; it; rv:1.8.1.11) Gecko/20071127 Firefox/2.0.0.11'})
+                    img_data = urllib2.urlopen(req)
+                    try:
+                        img = MIMEImage(img_data.read())
+                    except:
+                        img = MIMEImage(img_data.read(), _subtype="png")
+                    # WORKAROUND: because the gmail-android-app dosen't load contend-id-images, it replace the <img/> with an image_name and add the image as an attachment!
+                    content = re.sub(r'<img.*src="%s".*?/>' % re.escape(src), 'Bild_%d' % img_nr, content)
+                    img.add_header('Content-Disposition', 'attachment; filename="Bild_%d"' % img_nr)
+                    msg.attach(img)
+                except:
+                    print >>warn, "Could not load image: %s" % src.encode('utf-8')
+                    pass
+
+    if SUMMARIZE > 0:
+        content = summarize(content, SUMMARIZE)
+
+    body = '<h1 class="header"><a href="%s">%s</a></h1>\n' % (article_link, subject)
+    body += content
+
+    msg.attach(MIMEText(body, 'html', 'utf-8'))
+
     mail.create(MAIN_GMAIL_FOLDER)
     rv, data = mail.append(MAIN_GMAIL_FOLDER, "", published, msg.as_string())
     num = data[0].split(' ')[2][:-1]
+
     if rv == "OK":
         for label in labels:
             mail.select(MAIN_GMAIL_FOLDER)
@@ -156,7 +169,44 @@ def getFromEmail(feed_data, entry, firstlabel):
     return "\"%s\" <%s>" % (name.encode('utf-8'), mail)
 
 
+def summarize(text, lenght):
+    if len(text) > lenght:
+        txt_summarize = ""
+        for i in [". ", "? ", "! "]:
+            text_summarize = ""
+            text_array = text[0:lenght].split(i)[:-1]
+            for seq in text_array:
+                text_summarize += "%s%s" % (seq, i)
+            if len(text_summarize) > len(txt_summarize):
+                txt_summarize = text_summarize
+        # if txt_summarize == "":
+            # return text
+        # else:
+        return txt_summarize
+    else:
+        return text
+
+
 # Program Functions
+
+# HTML Parser for grabbing links and images
+
+from HTMLParser import HTMLParser
+
+
+class Parser(HTMLParser):
+    def __init__(self, tag='a', attr='href'):
+        HTMLParser.__init__(self)
+        self.tag = tag
+        self.attr = attr
+        self.attrs = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == self.tag:
+            attrs = dict(attrs)
+            if self.attr in attrs:
+                self.attrs.append(attrs[self.attr])
+
 
 def feed_db_save(array):
     os.remove(FEEDFILE_PATH)
@@ -199,7 +249,7 @@ def run(nosend, num=None):
                 continue
 
             valid_char = VALID_CHAR + ".-_"
-            t = "".join(x for x in f[-1] if x in valid_char)
+            t = "".join(x for x in f[3] if x in valid_char)
             path = os.path.join(ARCHIVE_PATH, t)
 
             try:
@@ -219,26 +269,20 @@ def run(nosend, num=None):
                         print "  new article: %s" % uid
                     if not nosend:
                         title = entry.get('title', None).strip()
-                        puplished = entry.get('published_parsed', time.localtime())
                         updated = entry.get('updated_parsed', time.localtime())
-
-                        if puplished != updated:
-                            print "          UPDATED-ARTICEL!!!"
-                            update = True
-                        else:
-                            update = False
-
+                        puplished = entry.get('published_parsed', updated)
                         author = getFromEmail(r, entry, f[3])
                         article_link = entry.get('link', r['feed'].get('link', ""))
-                        body = '<h1 class="header"><a href="%s">%s</a></h1>\n' % (article_link, title)
-                        body += getContent(entry)
-                        mail = send(author, title, puplished, f[3:], body, mail)
+                        content = getContent(entry)
+
+                        mail = send(author, title, article_link, puplished, f[3:], content, mail)
 
                     with open(path, 'a') as _file:
                         _file.write("%s\n" % uid.encode('utf-8'))
                         _file.close()
-            except:
+            except Exception as e:
                 print >>warn, "There was an Error on entry %s on Feed: %s" % (entry, f[0])
+                print >>warn, e
                 continue
 
             f[1], f[2] = r.get('etag', None), r.get('modified', None)
@@ -265,10 +309,10 @@ def add(add_list):
 
     try:
         d = feedparser.parse(add_list[0])
-
-        main_label = d['feed'].get('link', d['feed'].get('title', add_list[0])).strip().split('//')[1]
+        main_label = d['feed'].get('title', d['feed'].get('link', add_list[0])).strip()
         valid_char = VALID_CHAR + ".-_/ "
         labels = "".join(x for x in main_label if x in valid_char)  # get the Mainlabel(websitetitle)
+
         for l in add_list[1:]:  # add the other labels
             labels += "; " + "".join(x for x in l if x in valid_char)
 
@@ -295,10 +339,10 @@ def _list(array=False):  # is also used to load the db!
             if array:
                 feeds.append(v)
             else:
-                labels = v[4]
-                for l in v[5:]:
+                labels = v[3]
+                for l in v[4:]:
                     labels += ", " + l
-                print "%s.) %s [%s] %s" % (str(index), v[0].strip(), labels, v[1])
+                print "%s.) %s [%s]" % (str(index), v[0].strip(), labels)
     if array:
         return feeds
 
@@ -311,7 +355,7 @@ def reset(nr):
     elif nr > len(feeds):
         print "No such Feed"
     else:
-        url = feeds[nr][0]
+        url = feeds[nr][3]
         if url.startswith('#'):
             url = url[2:]
         t = "".join(x for x in url if x in VALID_CHAR)
@@ -354,7 +398,7 @@ def delete(nr):
     elif nr >= len(feeds):
         print "No such Feed"
     else:
-        url = feeds[nr][0]
+        url = feeds[nr][3]
         if url.startswith('#'):
             url = url[2:]
         t = "".join(x for x in url if x in VALID_CHAR)
@@ -382,7 +426,7 @@ if __name__ == '__main__':
     parser.add_argument("--no-send", help="Only load the feed, without sending them", action="store_true")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--delete", help="Delete a Feedurl", metavar="<nr>", type=int)
-    parser.add_argument("--delete_read", help="Delete read mails from gmail", action="store_true")
+    # parser.add_argument("--delete_read", help="Delete read mails from gmail", action="store_true")
     parser.add_argument("--reset", help="Reset a Feed-Archive-File", metavar="<nr>", type=int)
     parser.add_argument("--enable", help="Enable a Feed", metavar="<nr>", type=int)
     parser.add_argument("--disable", help="Disable a Feed", metavar="<nr>", type=int)
@@ -416,8 +460,8 @@ Please edit the config file to your need and start the tool again!"""
         VERBOSE = args.verbose
         if args.list:
             _list()
-        elif args.delete_read:
-            delete_read()
+        # elif args.delete_read:
+            # delete_read()
         elif args.delete >= 0:
             delete(args.delete)
         elif args.enable >= 0:
