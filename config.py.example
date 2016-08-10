@@ -9,9 +9,8 @@ GMAIL_USER = ''  # set GMAIL username here
 GMAIL_PASS = ''  # set GMAIL password here
 
 MAIN_GMAIL_FOLDER  = "RSS"     # Change the default imap folder, Mainfolder=INBOX
-IMAGES_AS_ATTACHMETNS = False # Add images as attachments (offline)
-USE_IMAGES = 0 # 0...disable; 1...enabled, 2...as attachments
-SUMMARIZE = 0 # 0...disabled; other values means after which char. it should stop(Warning: could a little bit higher because it waits for the end of the sentence)
+USE_IMAGES = 1 # 0...disable; 1...enabled, 2...as attachments
+SUMMARIZE = 0 # 0...disabled; other values means after which char. it should stop(Info: when using USE_IMAGES it is always 0)
 
 # FEED Options:
 ADD_ARCHIVE_NEW_FEED  = True  # Add links to archive when adding a new feed?
