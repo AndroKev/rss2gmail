@@ -32,6 +32,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
 from email.header import Header
+#import html2text as h2t # TODO: needed? maybe for subject-fix?
 import feedparser
 
 feedparser.USER_AGENT = "rss2gmail/" + __version__ + " +https://github.com/AndroKev/rss2gmail"
@@ -61,6 +62,7 @@ def send(author, subject, article_link, published, labels, content, mail=None):
     msg['Subject'] = Header(subject, 'utf-8')
     msg['From'] = author
     msg['To'] = GMAIL_USER
+    msg['Date'] = time.strftime('%a, %d %b %Y %H:%M:%S %z', published)
 
     if USE_IMAGES >= 0 or SUMMARIZE > 0:
         parser = Parser(tag='img', attr='src')
@@ -242,7 +244,12 @@ def run(nosend, num=None):
 
             print 'I: Processing [%d/%d] "%s"' % (feednum, len(ifeeds), f[0])
             r = {}
-            r = feedparser.parse(f[0], f[1], f[2])
+            try:
+                r = feedparser.parse(f[0], f[1], f[2])
+            except urllib2.URLError:
+                print "  ERROR: Can't connect to %s!" % f[0]
+                continue
+
             if r.get('status', None) == 304:
                 if VERBOSE:
                     print "  skipped: %s (nothing changed)" % f[0]
@@ -420,57 +427,66 @@ def email(addr):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--configfile", help="Path to your config-file", metavar="<file>")
-    parser.add_argument("--add", help="Add a Feedurl!", metavar="feedurl LABELS", nargs="+")
-    parser.add_argument("--no-send", help="Only load the feed, without sending them", action="store_true")
-    parser.add_argument("--list", action="store_true")
-    parser.add_argument("--delete", help="Delete a Feedurl", metavar="<nr>", type=int)
-    # parser.add_argument("--delete_read", help="Delete read mails from gmail", action="store_true")
-    parser.add_argument("--reset", help="Reset a Feed-Archive-File", metavar="<nr>", type=int)
-    parser.add_argument("--enable", help="Enable a Feed", metavar="<nr>", type=int)
-    parser.add_argument("--disable", help="Disable a Feed", metavar="<nr>", type=int)
-    parser.add_argument("--verbose", help="Get more information!", action="store_true")
-    parser.add_argument("--version", action="version", version="%(prog)s {version}".format(version=__version__))
-    parser.add_argument("integers", nargs="?", metavar="[num]", type=int)
-    args = parser.parse_args()
 
-    # Read options from config file if present.
-
-    if args.configfile:
-        sys.path.append(os.path.dirname(args.configfile))
-    else:
-        sys.path.insert(0, ".")
     try:
-        from config import *
-    except:
-        print >>warn, "No config-file found!"
-        print >>warn, "Please rename config.py.example to config.py, edit it und try it again!"
-        sys.exit(1)
+        if os.path.exists("/tmp/rss2gmail.lock"):
+            print("Already running! If that's an mistake, please delete '/tmp/rss2gmail.lock'")
+            exit()
+        open("/tmp/rss2gmail.lock", "w").close()
 
-    if not os.path.exists(FEEDFILE_PATH):
-        open(FEEDFILE_PATH, "w").close()
-    if not os.path.exists(ARCHIVE_PATH):
-        os.makedirs(ARCHIVE_PATH)
+        parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+        parser.add_argument("--configfile", help="Path to your config-file", metavar="<file>")
+        parser.add_argument("--add", help="Add a Feedurl!", metavar="feedurl LABELS", nargs="+")
+        parser.add_argument("--no-send", help="Only load the feed, without sending them", action="store_true")
+        parser.add_argument("--list", action="store_true")
+        parser.add_argument("--delete", help="Delete a Feedurl", metavar="<nr>", type=int)
+        # parser.add_argument("--delete_read", help="Delete read mails from gmail", action="store_true")
+        parser.add_argument("--reset", help="Reset a Feed-Archive-File", metavar="<nr>", type=int)
+        parser.add_argument("--enable", help="Enable a Feed", metavar="<nr>", type=int)
+        parser.add_argument("--disable", help="Disable a Feed", metavar="<nr>", type=int)
+        parser.add_argument("--verbose", help="Get more information!", action="store_true")
+        parser.add_argument("--version", action="version", version="%(prog)s {version}".format(version=__version__))
+        parser.add_argument("integers", nargs="?", metavar="[num]", type=int)
+        args = parser.parse_args()
 
-    if GMAIL_PASS == "" or GMAIL_USER == "":
-        print """It seams that you run the tool the first time.
-Please edit the config file to your need and start the tool again!"""
-    else:
-        VERBOSE = args.verbose
-        if args.list:
-            _list()
-        # elif args.delete_read:
-            # delete_read()
-        elif args.delete >= 0:
-            delete(args.delete)
-        elif args.enable >= 0:
-            toggleactive(args.enable, True)
-        elif args.disable >= 0:
-            toggleactive(args.disable, False)
-        elif args.reset >= 0:
-            reset(args.reset)
-        elif args.add:
-            add(args.add)
+        # Read options from config file if present.
+
+        if args.configfile:
+            sys.path.append(os.path.dirname(args.configfile))
         else:
-            run(args.no_send)
+            sys.path.insert(0, ".")
+        try:
+            from config import *
+        except:
+            print >>warn, "No config-file found!"
+            print >>warn, "Please rename config.py.example to config.py, edit it und try it again!"
+            sys.exit(1)
+
+        if not os.path.exists(FEEDFILE_PATH):
+            open(FEEDFILE_PATH, "w").close()
+        if not os.path.exists(ARCHIVE_PATH):
+            os.makedirs(ARCHIVE_PATH)
+
+        if GMAIL_PASS == "" or GMAIL_USER == "":
+            print """It seams that you run the tool the first time.
+    Please edit the config file to your need and start the tool again!"""
+        else:
+            VERBOSE = args.verbose
+            if args.list:
+                _list()
+            # elif args.delete_read:
+                # delete_read()
+            elif args.delete >= 0:
+                delete(args.delete)
+            elif args.enable >= 0:
+                toggleactive(args.enable, True)
+            elif args.disable >= 0:
+                toggleactive(args.disable, False)
+            elif args.reset >= 0:
+                reset(args.reset)
+            elif args.add:
+                add(args.add)
+            else:
+                run(args.no_send)
+    finally:
+            os.remove("/tmp/rss2gmail.lock")
