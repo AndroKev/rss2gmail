@@ -1,7 +1,7 @@
 rss2imap
 ========
 
-An adaptation of rss2email that uses GMAIL directly (with the help of feedparser)
+An adaptation of rss2email that uses GMAIL directly (with the help of [feedparser](https://github.com/JPFrancoia/feedparser) <-- please use this fork)
 
 Based on [rcarmo](https://github.com/rcarmo/rss2imap)
 
