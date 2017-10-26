@@ -429,10 +429,11 @@ def email(addr):
 if __name__ == '__main__':
 
     try:
-        if os.path.exists("/tmp/rss2gmail.lock"):
+		lockfile = os.path.join(ARCHIVE_PATH, "rss2gmail.lock")
+        if os.path.exists(lockfile):
             print("Already running! If that's an mistake, please delete '/tmp/rss2gmail.lock'")
             exit()
-        open("/tmp/rss2gmail.lock", "w").close()
+        open(lockfile, "w").close()
 
         parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
         parser.add_argument("--configfile", help="Path to your config-file", metavar="<file>")
@@ -489,4 +490,4 @@ if __name__ == '__main__':
             else:
                 run(args.no_send)
     finally:
-            os.remove("/tmp/rss2gmail.lock")
+            os.remove(lockfile)
